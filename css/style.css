@@ -1,0 +1,356 @@
+/* ==========================================================================
+   Himal Subedi — styles
+   A minimal, book-like layout floating over the celestial eye (js/eye.js).
+   ========================================================================== */
+
+:root {
+  --bg: #07060d;
+  --ink: #ece5d8;            /* warm cream, main text */
+  --ink-soft: rgba(236, 229, 216, 0.72);
+  --ink-faint: rgba(236, 229, 216, 0.42);
+  --gold: #d6ad6e;           /* accents */
+  --gold-soft: rgba(214, 173, 110, 0.75);
+  --serif: 'Cormorant Garamond', 'Cormorant', Garamond, 'Times New Roman', serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 100%;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  min-height: 100svh;
+  font-size: 1.25rem;
+  line-height: 1.6;
+}
+
+/* The animated sky sits behind everything */
+#sky {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+  transition: color 0.25s ease;
+}
+
+a:hover,
+a:focus-visible {
+  color: var(--gold);
+}
+
+:focus-visible {
+  outline: 1px solid var(--gold);
+  outline-offset: 4px;
+  border-radius: 2px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------------------------
+   Landing page
+   -------------------------------------------------------------------------- */
+
+.home-main {
+  min-height: 100vh;
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  padding: 0 1.5rem clamp(2.5rem, 8vh, 5rem);
+}
+
+.title-block {
+  position: relative;
+  width: min(27rem, 100%);
+  text-align: center;
+}
+
+/* A soft dark pool behind the text, so it always reads over the sky */
+.title-block::before {
+  content: '';
+  position: absolute;
+  inset: -3rem -5rem;
+  z-index: -1;
+  background: radial-gradient(closest-side, rgba(5, 4, 9, 0.72), rgba(5, 4, 9, 0));
+  pointer-events: none;
+}
+
+.name {
+  margin: 0;
+  font-weight: 500;
+  font-size: clamp(2.9rem, 7.5vw, 4.6rem);
+  line-height: 1.02;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  /* letter-spacing adds space after the last letter too; balance it */
+  padding-left: 0.14em;
+}
+
+.tagline {
+  margin: 0.9rem 0 2.2rem;
+  color: var(--gold);
+  font-style: italic;
+  font-size: clamp(1.05rem, 2.6vw, 1.3rem);
+  letter-spacing: 0.02em;
+}
+
+.tagline .sep {
+  margin: 0 0.35em;
+  color: var(--gold-soft);
+  font-style: normal;
+  opacity: 0.6;
+}
+
+/* Table of contents, like the first page of a book */
+.toc {
+  list-style: none;
+  margin: 0 auto;
+  padding: 0;
+  text-align: left;
+}
+
+.toc a {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.32rem 0;
+  font-size: 1.05rem;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.toc .leader {
+  flex: 1;
+  height: 2px;
+  align-self: center;
+  margin-top: 0.35em;
+  background-image: radial-gradient(circle, var(--ink-faint) 0.8px, transparent 1.1px);
+  background-size: 8px 2px;
+  background-repeat: repeat-x;
+  background-position: left center;
+}
+
+.toc .num {
+  min-width: 2ch;
+  text-align: right;
+  letter-spacing: 0.08em;
+}
+
+.toc a:hover .leader,
+.toc a:focus-visible .leader {
+  background-image: radial-gradient(circle, var(--gold-soft) 0.8px, transparent 1.1px);
+}
+
+/* The little star: replays the eye animation */
+.star {
+  display: block;
+  margin: 2.4rem auto 0;
+  padding: 0.4rem;
+  border: 0;
+  background: none;
+  color: var(--gold);
+  cursor: pointer;
+  opacity: 0.85;
+  transition: transform 0.6s ease, opacity 0.25s ease;
+}
+
+.star:hover,
+.star:focus-visible {
+  opacity: 1;
+  transform: rotate(45deg);
+}
+
+.star svg {
+  display: block;
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+/* Text fades in once the eye has mostly formed (js adds .is-ready).
+   Without JavaScript, everything is simply visible. */
+.js .home .title-block {
+  opacity: 0;
+  transform: translateY(0.6rem);
+  transition: opacity 1.6s ease, transform 1.6s ease;
+}
+
+.js .home.is-ready .title-block {
+  opacity: 1;
+  transform: none;
+}
+
+/* --------------------------------------------------------------------------
+   Inner pages (About, Education, Experience, Projects)
+   -------------------------------------------------------------------------- */
+
+.page-header {
+  padding: 2rem 1.5rem 0;
+  text-align: center;
+}
+
+.home-link {
+  font-size: 0.95rem;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+.page-main {
+  width: min(38rem, 100% - 3rem);
+  margin: 0 auto;
+  padding: clamp(3rem, 12vh, 7rem) 0 3rem;
+}
+
+.chapter {
+  margin: 0;
+  color: var(--gold);
+  text-align: center;
+  font-size: 1.1rem;
+  letter-spacing: 0.2em;
+}
+
+.page-title {
+  margin: 0.2rem 0 0;
+  text-align: center;
+  font-weight: 500;
+  font-size: clamp(2.4rem, 6vw, 3.4rem);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding-left: 0.12em;
+}
+
+.ornament {
+  display: block;
+  width: 7rem;
+  height: 1px;
+  margin: 1.6rem auto 2.6rem;
+  background: linear-gradient(90deg, transparent, var(--gold-soft), transparent);
+}
+
+.prose {
+  color: var(--ink-soft);
+  background: radial-gradient(closest-side, rgba(5, 4, 9, 0.55), rgba(5, 4, 9, 0));
+}
+
+.prose p {
+  margin: 0 0 1.2em;
+}
+
+.prose a {
+  color: var(--ink);
+  border-bottom: 1px solid var(--gold-soft);
+}
+
+.prose a:hover,
+.prose a:focus-visible {
+  color: var(--gold);
+}
+
+.placeholder {
+  color: var(--ink-faint);
+  font-style: italic;
+}
+
+/* Entries: used for education, experience and projects */
+.entries {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.entry {
+  margin: 0 0 2.2rem;
+}
+
+.entry-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0 1rem;
+}
+
+.entry-title {
+  margin: 0;
+  color: var(--ink);
+  font-size: 1.35rem;
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+.entry-meta {
+  color: var(--gold);
+  font-size: 1rem;
+  font-style: italic;
+}
+
+.entry p {
+  margin: 0.35rem 0 0;
+}
+
+.entry-tags {
+  margin-top: 0.4rem;
+  color: var(--ink-faint);
+  font-size: 0.85rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.page-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  width: min(38rem, 100% - 3rem);
+  margin: 0 auto;
+  padding: 2rem 0 3rem;
+  border-top: 1px solid rgba(236, 229, 216, 0.12);
+  font-size: 0.9rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.page-footer a {
+  color: var(--ink-soft);
+}
+
+.page-footer a:hover,
+.page-footer a:focus-visible {
+  color: var(--gold);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+  }
+}
