@@ -4,7 +4,7 @@
    ========================================================================== */
 
 :root {
-  --bg: #07060d;
+  --bg: #060607;
   --ink: #ece5d8;            /* warm cream, main text */
   --ink-soft: rgba(236, 229, 216, 0.72);
   --ink-faint: rgba(236, 229, 216, 0.42);
@@ -297,7 +297,7 @@ a:focus-visible {
   list-style: none;
 }
 
-/* Outlined button, e.g. "Hobbies →" on the About page */
+/* Outlined button, e.g. "Interests →" on the About page */
 .prose a.button {
   display: inline-block;
   margin-top: 0.4rem;
@@ -413,7 +413,7 @@ a:focus-visible {
 }
 
 /* --------------------------------------------------------------------------
-   Picture grid (Hobbies page)
+   Picture grid (Interests page)
    -------------------------------------------------------------------------- */
 
 .gallery {
@@ -481,4 +481,41 @@ a:focus-visible {
 .prose .credits a {
   color: var(--ink-faint);
   border-bottom-color: rgba(236, 229, 216, 0.2);
+}
+
+/* --------------------------------------------------------------------------
+   Toolkit (skills on the About page)
+   -------------------------------------------------------------------------- */
+
+.toolkit {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.35rem 1.4rem;
+  margin: 0;
+}
+
+.toolkit dt {
+  color: var(--ink);
+  font-size: 0.9rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  line-height: 1.9;
+}
+
+.toolkit dd {
+  margin: 0;
+}
+
+.prose .toolkit-next {
+  margin-top: 2.2rem;
+}
+
+@media (max-width: 30rem) {
+  .toolkit {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .toolkit dd {
+    margin-bottom: 0.7rem;
+  }
 }

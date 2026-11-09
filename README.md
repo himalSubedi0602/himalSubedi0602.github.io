@@ -41,7 +41,7 @@ smoke rather than dots.
    looked up at a swirled position, so the lines billow and wisps rise off them.
 4. **Intro:** a smoke cloud gathers, then the lines condense out of it one by
    one. Once formed, all other smoke clears and the eye settles into a calm drift.
-5. **Background:** dim smoke ribbons during the first intro only.
+5. **Background:** dim grey smoke during the first intro only.
 6. **Hover:** moving the mouse onto the eye (or tapping it on a phone)
    dissolves it back into smoke, and it forms again.
 

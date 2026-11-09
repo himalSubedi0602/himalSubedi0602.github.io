@@ -54,9 +54,9 @@
     eyeMaxWidth: mode === 'intro' ? 480 : 640,
     eyeBrightness: mode === 'intro' ? 1 : 0.32,
     smokeBrightness: mode === 'intro' ? 1 : 0,    // background smoke ribbons (intro only)
-    introSeconds: 4.5,      // time for all lines to condense
-    dissolveSeconds: 1.1,   // hover: time to dissolve back into smoke
-    reformSeconds: 3.2,     // hover: time to form again
+    introSeconds: 5,        // time for all lines to condense
+    dissolveSeconds: 2.6,   // hover: time to dissolve back into smoke
+    reformSeconds: 5,       // hover: time to form again
     renderScale: 0.75       // render at 75% resolution; smoke is soft anyway
   };
 
@@ -217,52 +217,67 @@
 
       // --- the eye ----------------------------------------------------------
       float eyeSize = uEye.z;
-      // Push the lookup around with the swirl so the lines billow.
       // 0 while forming, 1 once settled: the eye calms down once it's formed
       float calm = smoothstep(1.0, 1.5, uProgress);
-      vec2 disp = ((r - 0.5) * eyeSize * 0.05 + (q - 0.5) * eyeSize * 0.02) * mix(1.0, 0.4, calm);
-      vec4 m = mask(px + disp);
+      // Gentle billow that every part of the eye always has
+      vec2 drift = ((r - 0.5) * eyeSize * 0.045 + (q - 0.5) * eyeSize * 0.02) * mix(1.0, 0.4, calm);
 
-      // Appear once the intro passes this part's time (green channel)
-      float reveal = smoothstep(m.g - 0.06, m.g + 0.04, uProgress);
+      // How "formed" this spot is. Each part of the line has its own time in
+      // the mask's green channel, so the eye assembles in drawing order.
+      float g = mask(px + drift).g;
+      float formed = smoothstep(g - 0.22, g + 0.1, uProgress);
+      float loose = 1.0 - formed;
 
-      // Wisps: the lines sampled a little lower and pushed harder, so smoke
-      // seems to rise off them.
+      // Not yet formed: look the mask up far away, pushed by the swirl and
+      // from below, so the line's smoke is scattered and rising. As "formed"
+      // goes to 1 the push shrinks and the smoke flows into place.
+      // Fine, turbulent noise so the line breaks into separate wisps rather
+      // than shifting as one piece.
+      vec2 turb = vec2(fbm(pe * 1.8 + t * 0.3), fbm(pe * 1.8 + vec2(4.1, 7.3) - t * 0.25));
+      vec2 scatter = (turb - 0.5) * eyeSize * 0.42 * pow(loose, 1.4)
+                   + (r - 0.5) * eyeSize * 0.12 * loose
+                   + vec2(0.0, eyeSize * 0.07) * loose;
+      vec4 m = mask(px + drift + scatter);
+
+      // A line part only shows smoke shortly before its turn
+      float gate = smoothstep(m.g - 0.3, m.g - 0.05, uProgress);
+
+      // Scattered smoke is thin and patchy; it thickens as it condenses
+      float lineDensity = m.r * smoothstep(0.7 - 0.5 * formed, 0.98 - 0.2 * formed, fine)
+                        * mix(0.45, 1.1, formed) * gate;
+      float haloDensity = m.b * smoothstep(0.35, 0.85, n * 0.5 + fine * 0.5)
+                        * mix(1.0, 1.2, formed) * gate * mix(1.0, 0.4, calm);
+
+      // Wisps rising off the lines while forming
       vec2 rise = vec2((r.y - 0.5) * eyeSize * 0.08, eyeSize * (0.025 + 0.045 * fine));
-      vec4 mw = mask(px + rise + disp * 1.8);
-      float wispReveal = smoothstep(mw.g - 0.06, mw.g + 0.1, uProgress - 0.1);
+      vec4 mw = mask(px + rise + drift * 1.8);
+      float wispDensity = mw.r * smoothstep(0.45, 0.88, fine) * 0.6
+                        * smoothstep(mw.g - 0.05, mw.g + 0.1, uProgress) * (1.0 - calm);
 
-      float lineDensity = m.r * smoothstep(0.22, 0.78, fine) * 1.1 * reveal;
-      float haloDensity = m.b * smoothstep(0.3, 0.8, n * 0.5 + fine * 0.5) * 1.3 * reveal * mix(1.0, 0.45, calm);
-      float wispDensity = mw.r * smoothstep(0.4, 0.85, fine) * 0.7 * wispReveal * (1.0 - calm);
-
-      // The intro cloud: billowing smoke over the eye that thins as lines form
+      // A soft cloud of smoke over the eye at the start, drawn in as it forms
       vec2 ec = (px - (uEye.xy + uEye.zw * 0.5)) / uEye.zw;
-      float ellipse = 1.0 - smoothstep(0.15, 0.55, length(ec * vec2(1.0, 1.25)));
-      float cloudLife = smoothstep(0.0, 0.18, uProgress) * (1.0 - smoothstep(0.45, 1.1, uProgress));
-      float cloud = ellipse * smoothstep(0.3, 0.85, n * 0.6 + fine * 0.5) * cloudLife * 0.9;
+      float ellipse = 1.0 - smoothstep(0.12, 0.55, length(ec * vec2(1.0, 1.25)));
+      float cloudLife = smoothstep(0.0, 0.2, uProgress) * (1.0 - smoothstep(0.35, 1.0, uProgress));
+      float cloud = ellipse * smoothstep(0.35, 0.9, n * 0.6 + fine * 0.5) * cloudLife * 0.6;
 
       float eyeDensity = (lineDensity + haloDensity + wispDensity + cloud) * uEyeAlpha;
 
-      // --- colour -----------------------------------------------------------
-      vec3 bg     = mix(vec3(0.038, 0.032, 0.065), vec3(0.018, 0.015, 0.03), uv.y);
-      vec3 deep   = vec3(0.22, 0.17, 0.42);
-      vec3 violet = vec3(0.52, 0.40, 0.80);
-      vec3 pale   = vec3(0.80, 0.74, 0.96);
-      vec3 amber  = vec3(0.92, 0.66, 0.38);
+      // --- colour: real smoke, grey and white on near-black -----------------
+      vec3 bg       = mix(vec3(0.036, 0.036, 0.042), vec3(0.016, 0.016, 0.02), uv.y);
+      vec3 smokeLo  = vec3(0.30, 0.30, 0.32);
+      vec3 smokeHi  = vec3(0.72, 0.72, 0.74);
+      vec3 eyeLo    = vec3(0.60, 0.60, 0.63);
+      vec3 eyeHi    = vec3(0.93, 0.93, 0.94);
 
-      vec3 smoke = mix(deep, violet, smoothstep(0.25, 0.8, n));
-      smoke = mix(smoke, amber, smoothstep(0.58, 0.82, r.y) * 0.55);
-
-      vec3 eyeCol = mix(violet, pale, smoothstep(0.55, 1.0, fine) * 0.8);
-      eyeCol = mix(eyeCol, amber, smoothstep(0.6, 0.85, r.x) * 0.45);
+      vec3 smoke  = mix(smokeLo, smokeHi, smoothstep(0.25, 0.85, n));
+      vec3 eyeCol = mix(eyeLo, eyeHi, smoothstep(0.45, 1.0, fine));
 
       // Soft "exposure" curve so dense smoke glows without blowing out
       vec3 col = bg;
       col += smoke * (1.0 - exp(-bgDensity * 1.6));
       col += eyeCol * (1.0 - exp(-eyeDensity * 1.2)) * 0.8;
 
-      // A little grain hides colour banding in dark gradients
+      // A little grain hides banding in dark gradients
       col += (hash(px + fract(t)) - 0.5) / 255.0;
 
       gl_FragColor = vec4(col, 1.0);
