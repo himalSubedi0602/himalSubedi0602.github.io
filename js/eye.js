@@ -16,7 +16,10 @@
  *      sampled at a position pushed around by the swirl, so lines billow and
  *      wisps drift off them instead of looking like clean strokes.
  *   4. On the landing page, a smoke cloud gathers first, then the lines
- *      condense out of it one by one while the cloud thins.
+ *      condense out of it one by one. Once the eye is formed, all the other
+ *      smoke clears away and the eye settles to a calm, slow drift.
+ *   5. Hovering over the eye (or tapping it) dissolves it back into smoke,
+ *      and it forms again.
  *
  * Page options, set on <body>:
  *   data-eye="intro"  – landing page: play the intro, place the eye above
@@ -50,8 +53,10 @@
     eyeMinWidth: 260,
     eyeMaxWidth: mode === 'intro' ? 480 : 640,
     eyeBrightness: mode === 'intro' ? 1 : 0.32,
-    smokeBrightness: mode === 'intro' ? 1 : 0.6,  // background smoke ribbons
+    smokeBrightness: mode === 'intro' ? 1 : 0,    // background smoke ribbons (intro only)
     introSeconds: 4.5,      // time for all lines to condense
+    dissolveSeconds: 1.1,   // hover: time to dissolve back into smoke
+    reformSeconds: 3.2,     // hover: time to form again
     renderScale: 0.75       // render at 75% resolution; smoke is soft anyway
   };
 
@@ -213,7 +218,9 @@
       // --- the eye ----------------------------------------------------------
       float eyeSize = uEye.z;
       // Push the lookup around with the swirl so the lines billow.
-      vec2 disp = (r - 0.5) * eyeSize * 0.05 + (q - 0.5) * eyeSize * 0.02;
+      // 0 while forming, 1 once settled: the eye calms down once it's formed
+      float calm = smoothstep(1.0, 1.5, uProgress);
+      vec2 disp = ((r - 0.5) * eyeSize * 0.05 + (q - 0.5) * eyeSize * 0.02) * mix(1.0, 0.4, calm);
       vec4 m = mask(px + disp);
 
       // Appear once the intro passes this part's time (green channel)
@@ -226,13 +233,13 @@
       float wispReveal = smoothstep(mw.g - 0.06, mw.g + 0.1, uProgress - 0.1);
 
       float lineDensity = m.r * smoothstep(0.22, 0.78, fine) * 1.1 * reveal;
-      float haloDensity = m.b * smoothstep(0.3, 0.8, n * 0.5 + fine * 0.5) * 1.3 * reveal;
-      float wispDensity = mw.r * smoothstep(0.4, 0.85, fine) * 0.7 * wispReveal;
+      float haloDensity = m.b * smoothstep(0.3, 0.8, n * 0.5 + fine * 0.5) * 1.3 * reveal * mix(1.0, 0.45, calm);
+      float wispDensity = mw.r * smoothstep(0.4, 0.85, fine) * 0.7 * wispReveal * (1.0 - calm);
 
       // The intro cloud: billowing smoke over the eye that thins as lines form
       vec2 ec = (px - (uEye.xy + uEye.zw * 0.5)) / uEye.zw;
       float ellipse = 1.0 - smoothstep(0.15, 0.55, length(ec * vec2(1.0, 1.25)));
-      float cloudLife = smoothstep(0.0, 0.18, uProgress) * (1.0 - 0.7 * smoothstep(0.45, 1.05, uProgress));
+      float cloudLife = smoothstep(0.0, 0.18, uProgress) * (1.0 - smoothstep(0.45, 1.1, uProgress));
       float cloud = ellipse * smoothstep(0.3, 0.85, n * 0.6 + fine * 0.5) * cloudLife * 0.9;
 
       float eyeDensity = (lineDensity + haloDensity + wispDensity + cloud) * uEyeAlpha;
@@ -311,11 +318,12 @@
   });
   gl.uniform1i(u.uMask, 0);
   gl.uniform1f(u.uEyeAlpha, SETTINGS.eyeBrightness);
-  gl.uniform1f(u.uSmokeAlpha, SETTINGS.smokeBrightness);
 
   // ---------------------------------------------------------------------------
   // 3. Layout: where and how big the eye is on this screen
   // ---------------------------------------------------------------------------
+  let eyeRect = { x: 0, y: 0, w: 1, h: 1 }; // mask rectangle in CSS px, for hover
+
   function layout() {
     const W = canvas.clientWidth || window.innerWidth;
     const H = canvas.clientHeight || window.innerHeight;
@@ -347,20 +355,53 @@
     const x = cx - w / 2;
     const y = cy - h / 2;
     gl.uniform4f(u.uEye, x * res, y * res, w * res, h * res);
+    eyeRect = { x: x, y: y, w: w, h: h };
   }
 
   // ---------------------------------------------------------------------------
   // 4. Run
   // ---------------------------------------------------------------------------
-  const skipIntro = mode === 'rest' || reduceMotion;
-  let start = performance.now();
+  //
+  // `progress` drives everything the shader shows:
+  //   0      nothing yet          ~0.1–0.9  smoke cloud, lines condensing
+  //   1      lines all formed     1.6       settled: smoke cleared, calm eye
+  //
+  // state: 'intro' → 'formed' → (hover) 'dissolve' → 'reform' → 'formed' …
+  const SETTLED = 1.6;
+  let state = (mode === 'rest' || reduceMotion) ? 'formed' : 'intro';
+  let progress = state === 'formed' ? SETTLED : 0;
+  let introFade = state === 'formed' ? 1 : 0; // background ribbons: 0 = shown, 1 = gone for good
   let isReady = false;
+  const startTime = performance.now();
+  let last = startTime;
+
+  function step(dt) {
+    if (state === 'intro' || state === 'reform') {
+      const seconds = state === 'intro' ? SETTINGS.introSeconds : SETTINGS.reformSeconds;
+      progress += dt / seconds;
+      if (progress >= SETTLED) { progress = SETTLED; state = 'formed'; }
+    } else if (state === 'dissolve') {
+      progress -= dt * (SETTLED / SETTINGS.dissolveSeconds);
+      if (progress <= 0.12) { progress = 0.12; state = 'reform'; }
+    }
+    // The background smoke only belongs to the first intro; once it has
+    // cleared it stays gone.
+    if (state === 'intro') introFade = Math.max(introFade, smoothstep(0.95, 1.45, progress));
+    else introFade = 1;
+  }
+
+  function smoothstep(a, b, x) {
+    const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+    return t * t * (3 - 2 * t);
+  }
 
   function draw(now) {
-    const time = (now - start) / 1000;
-    const progress = skipIntro ? 2 : time / SETTINGS.introSeconds;
-    gl.uniform1f(u.uTime, time + 20); // +20: start mid-swirl
+    const dt = Math.min((now - last) / 1000, 0.05);
+    last = now;
+    step(dt);
+    gl.uniform1f(u.uTime, (now - startTime) / 1000 + 20); // +20: start mid-swirl
     gl.uniform1f(u.uProgress, progress);
+    gl.uniform1f(u.uSmokeAlpha, SETTINGS.smokeBrightness * (1 - introFade));
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
     if (!isReady && progress > 0.6) {
@@ -372,12 +413,12 @@
   layout();
 
   if (reduceMotion) {
-    draw(start);
+    draw(startTime);
   } else {
     (function loop(now) {
       draw(now);
       requestAnimationFrame(loop);
-    })(start);
+    })(startTime);
   }
 
   let resizeTimer;
@@ -389,11 +430,37 @@
     }, 120);
   });
 
-  // The little star on the landing page replays the intro.
-  const replay = document.querySelector('[data-replay]');
-  if (replay && !reduceMotion) {
-    replay.addEventListener('click', function () {
-      start = performance.now();
+  // ---------------------------------------------------------------------------
+  // 5. Hover: dissolve the eye into smoke and form it again (landing page)
+  // ---------------------------------------------------------------------------
+  function dissolve() {
+    if (state === 'formed') state = 'dissolve';
+  }
+
+  // Is this point (CSS px) on the eye's lines or the soft area around them?
+  function isOnEye(clientX, clientY) {
+    const uvx = (clientX - eyeRect.x) / eyeRect.w;
+    const uvy = (clientY - eyeRect.y) / eyeRect.h;
+    if (uvx < 0 || uvy < 0 || uvx >= 1 || uvy >= 1) return false;
+    const i = (Math.floor(uvy * maskImage.height) * maskImage.width + Math.floor(uvx * maskImage.width)) * 4;
+    return maskImage.data[i] > 30 || maskImage.data[i + 2] > 30; // line or halo
+  }
+
+  if (mode === 'intro' && !reduceMotion) {
+    let wasOnEye = false;
+    window.addEventListener('pointermove', function (e) {
+      if (e.pointerType !== 'mouse') return;
+      const onEye = isOnEye(e.clientX, e.clientY);
+      if (onEye && !wasOnEye) dissolve(); // only when the pointer arrives
+      wasOnEye = onEye;
+    });
+    // Touch screens have no hover, so a tap on the eye does the same.
+    window.addEventListener('pointerdown', function (e) {
+      if (e.pointerType !== 'mouse' && isOnEye(e.clientX, e.clientY)) dissolve();
     });
   }
+
+  // The little star on the landing page also replays the eye.
+  const replay = document.querySelector('[data-replay]');
+  if (replay && !reduceMotion) replay.addEventListener('click', dissolve);
 })();
