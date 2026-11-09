@@ -1,10 +1,10 @@
 /*
- * The celestial eye.
+ * The smoke eye.
  *
- * Draws a dark night sky on a full-screen <canvas>, then gathers thousands of
- * glowing particles out of drifting space dust onto the traced lines of
- * Himal's eye (js/eye-paths.js). Once formed, the eye stays as the background
- * and keeps a faint shimmer.
+ * Draws slow, drifting smoke on a full-screen <canvas>, then condenses
+ * thousands of soft smoke particles onto the traced lines of Himal's eye
+ * (js/eye-paths.js). Once formed, the eye stays as the background, breathing
+ * gently, with a few wisps curling off its lines.
  *
  * Page options, set on <body>:
  *   data-eye="intro"  – landing page: play the gathering animation, and fit
@@ -31,32 +31,33 @@
   // Look & feel. Tweak these to change the mood.
   // ---------------------------------------------------------------------------
 
-  // Particle colours (RGB). Kept mid-bright: visible, never glaring.
+  // Smoke colours (RGB): muted greys with a hint of violet, and a dim ember.
+  // The colour names match the ones used in js/eye-paths.js.
   const PALETTE = {
-    violet:   [146, 112, 224],
-    lavender: [196, 178, 246],
-    indigo:   [96, 104, 214],
-    ice:      [176, 196, 255],
-    amber:    [232, 172, 104]
+    lavender: [206, 200, 222],  // pale smoke
+    ice:      [218, 216, 230],  // near-white smoke
+    violet:   [146, 132, 190],  // violet haze
+    indigo:   [112, 112, 162],  // deep haze
+    amber:    [192, 160, 132]   // faint ember
   };
 
   const SETTINGS = {
-    eyeBrightness: mode === 'intro' ? 1 : 0.16, // overall eye opacity
-    nebulaBrightness: mode === 'intro' ? 0.85 : 0.55,
-    particlesPerPixel: 6,        // eye particles per pixel of eye width
-    minParticles: 1800,
-    maxParticles: 6000,
-    lineThickness: 1.5,          // spread around each line, in tracing units
-    hazeShare: 0.12,             // share of particles that float loosely as haze
-    gatherSpeed: 1,              // >1 = faster intro, <1 = slower
-    shimmer: 0.7                 // how far settled particles wobble, in px
+    eyeBrightness: mode === 'intro' ? 1 : 0.24, // overall eye opacity
+    smokeBrightness: mode === 'intro' ? 1 : 0.7, // background smoke opacity
+    particlesPerPixel: 5,     // eye particles per pixel of eye width
+    minParticles: 1400,
+    maxParticles: 4200,
+    lineThickness: 1.4,         // spread around each line, in tracing units
+    wispShare: 0.14,            // share of particles that curl off as wisps
+    gatherSpeed: 1,             // >1 = faster intro, <1 = slower
+    breathe: 1.2                // how far settled smoke sways, in px
   };
 
   // ---------------------------------------------------------------------------
   // Small helpers
   // ---------------------------------------------------------------------------
 
-  // Seeded random numbers, so the sky looks the same every visit and resize.
+  // Seeded random numbers, so the smoke looks the same on every visit.
   function seededRandom(seed) {
     return function () {
       seed = (seed * 1664525 + 1013904223) >>> 0;
@@ -73,18 +74,19 @@
     return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
   }
 
-  // A smooth, slowly changing "wind" direction at any point: makes dust swirl
-  // like smoke instead of moving in straight lines.
+  // A smooth, slowly changing "wind" direction at any point, so smoke curls
+  // instead of moving in straight lines.
   function flowAngle(x, y, t) {
-    const s = 0.0017;
+    const s = 0.0016;
     return (
-      Math.sin(x * s + t * 0.15) +
-      Math.cos(y * s * 1.3 - t * 0.11) +
-      Math.sin((x + y) * s * 0.7 + t * 0.07)
+      Math.sin(x * s + t * 0.12) +
+      Math.cos(y * s * 1.3 - t * 0.09) +
+      Math.sin((x + y) * s * 0.7 + t * 0.05)
     ) * Math.PI;
   }
 
-  // One soft, glowing dot image per colour, drawn once and reused for speed.
+  // One soft puff image per colour, drawn once and reused for speed.
+  // No bright centre: it fades evenly, like smoke rather than a star.
   const sprites = {};
   Object.keys(PALETTE).forEach(function (key) {
     const [r, g, b] = PALETTE[key];
@@ -93,9 +95,9 @@
     c.width = c.height = size;
     const g2 = c.getContext('2d');
     const grad = g2.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-    grad.addColorStop(0, `rgba(${r},${g},${b},1)`);
-    grad.addColorStop(0.18, `rgba(${r},${g},${b},0.55)`);
-    grad.addColorStop(0.5, `rgba(${r},${g},${b},0.1)`);
+    grad.addColorStop(0, `rgba(${r},${g},${b},0.85)`);
+    grad.addColorStop(0.4, `rgba(${r},${g},${b},0.35)`);
+    grad.addColorStop(0.75, `rgba(${r},${g},${b},0.08)`);
     grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
     g2.fillStyle = grad;
     g2.fillRect(0, 0, size, size);
@@ -142,8 +144,7 @@
   // ---------------------------------------------------------------------------
 
   let eyeParticles = [];
-  let dust = [];
-  let stars = [];
+  let puffs = [];
 
   function createEyeParticles(total) {
     const totalWeight = lines.reduce((sum, l) => sum + l.length * l.density, 0);
@@ -161,26 +162,25 @@
         const [x1, y1] = pts[i + 1];
 
         // Push the particle a little to either side of the line
-        // (perpendicular to it) so the stroke looks soft and smoky.
+        // (perpendicular to it) so the stroke looks soft.
         const dx = x1 - x0, dy = y1 - y0;
         const len = Math.hypot(dx, dy) || 1;
-        const isHaze = rand() < SETTINGS.hazeShare;
-        const spread = SETTINGS.lineThickness * (isHaze ? 4.5 : 1);
-        const offset = gaussian(rand) * spread;
+        const isWisp = rand() < SETTINGS.wispShare;
+        const offset = gaussian(rand) * SETTINGS.lineThickness * (isWisp ? 2.5 : 1);
 
         particles.push({
           // Home position, in tracing units
           lx: x0 - (dy / len) * offset,
           ly: y0 + (dx / len) * offset,
           color: pick(line.colors, rand),
-          size: isHaze ? 0.9 + rand() * 1.4 : 0.7 + rand() * 1.0,
-          alpha: isHaze ? 0.14 + rand() * 0.14 : 0.4 + rand() * 0.45,
+          wisp: isWisp,
+          size: isWisp ? 2 + rand() * 2 : 0.8 + rand() * 0.9,
+          alpha: isWisp ? 0.03 + rand() * 0.04 : 0.07 + rand() * 0.08,
           // Lines gather one after another, each one "drawn" from start to end
-          delay: (0.25 + line.order * 0.42 + along * 0.7 + rand() * 0.45) / SETTINGS.gatherSpeed,
-          duration: (1.7 + rand() * 0.9) / SETTINGS.gatherSpeed,
+          delay: (0.3 + line.order * 0.45 + along * 0.8 + rand() * 0.6) / SETTINGS.gatherSpeed,
+          duration: (2 + rand() * 1.1) / SETTINGS.gatherSpeed,
           phase: rand() * Math.PI * 2,
-          wobble: 0.4 + rand() * 0.9,
-          twinkle: 0.6 + rand() * 1.6,
+          sway: 0.15 + rand() * 0.35,
           // Free-floating position before it reaches home (set in scatter())
           fx: 0,
           fy: 0
@@ -190,47 +190,27 @@
     return particles;
   }
 
-  // Place every eye particle somewhere out in the dust, ready to gather.
+  // Place every eye particle somewhere in a loose cloud, ready to gather.
   function scatter() {
     const box = eyeBox();
     eyeParticles.forEach(function (p) {
-      if (rand() < 0.6) {
-        // Near the eye, in a cloud about twice its size
-        p.fx = box.x + box.w / 2 + gaussian(rand) * box.w;
-        p.fy = box.y + box.h / 2 + gaussian(rand) * box.h * 1.6;
-      } else {
-        p.fx = rand() * W;
-        p.fy = rand() * H;
-      }
+      p.fx = box.x + box.w / 2 + gaussian(rand) * box.w * 0.9;
+      p.fy = box.y + box.h * 0.6 + gaussian(rand) * box.h * 1.4;
     });
   }
 
-  function createDust(count) {
+  // Big, faint, slowly drifting puffs of background smoke.
+  function createPuffs(count) {
+    const r = seededRandom(11);
     const list = [];
     for (let i = 0; i < count; i++) {
       list.push({
-        x: rand() * W,
-        y: rand() * H,
-        color: pick(['violet', 'indigo', 'indigo', 'lavender', 'amber'], rand),
-        size: 0.5 + rand() * 1.3,
-        alpha: 0.06 + rand() * 0.16,
-        speed: 6 + rand() * 14,
-        phase: rand() * Math.PI * 2
-      });
-    }
-    return list;
-  }
-
-  function createStars(count) {
-    const r = seededRandom(42);
-    const list = [];
-    for (let i = 0; i < count; i++) {
-      list.push({
-        x: r(), // stored as 0..1 so they survive resizes
-        y: r(),
-        size: 0.25 + r() * r() * 1.1,
-        alpha: 0.15 + r() * 0.5,
-        speed: 0.4 + r() * 1.8,
+        x: r() * W,
+        y: r() * H,
+        radius: 90 + r() * 220,
+        color: pick(['indigo', 'indigo', 'violet', 'lavender'], r),
+        alpha: 0.03 + r() * 0.04,
+        speed: 4 + r() * 7,
         phase: r() * Math.PI * 2
       });
     }
@@ -243,8 +223,6 @@
 
   let W = 0, H = 0, dpr = 1;
   let scale = 1, originX = 0, originY = 0;
-  const nebulaSmall = document.createElement('canvas'); // painted at low res
-  const nebula = document.createElement('canvas');      // blurred, full size
 
   function eyeBox() {
     return { x: originX, y: originY, w: drawing.width * scale, h: drawing.height * scale };
@@ -258,9 +236,8 @@
     canvas.width = Math.round(W * dpr);
     canvas.height = Math.round(H * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.imageSmoothingQuality = 'high';
 
-    let top = H * 0.04;
+    let top = H * 0.06;
     let bottom = H * 0.94;
     let maxWidth = Math.min(W * 0.94, 1240);
 
@@ -272,75 +249,13 @@
         bottom = Math.max(H * 0.34, anchorTop - H * 0.015);
       }
       maxWidth = Math.min(W * 0.96, 1150);
+      top = H * 0.04;
     }
 
     const roomH = bottom - top;
     scale = Math.min(maxWidth / drawing.width, roomH / drawing.height);
     originX = (W - drawing.width * scale) / 2;
     originY = top + (roomH - drawing.height * scale) / 2;
-
-    buildNebula();
-  }
-
-  // The coloured clouds: lots of very faint, soft blobs along a few ribbons,
-  // painted once into a small canvas and stretched to fill the screen (which
-  // makes them even softer).
-  function buildNebula() {
-    const q = 3; // draw at 1/3 size
-    const nw = Math.ceil(W / q), nh = Math.ceil(H / q);
-    nebulaSmall.width = nw;
-    nebulaSmall.height = nh;
-    const n = nebulaSmall.getContext('2d');
-    n.clearRect(0, 0, nw, nh);
-    n.globalCompositeOperation = 'lighter';
-
-    const r = seededRandom(7);
-    const box = eyeBox();
-    const cx = (box.x + box.w / 2) / q;
-    const cy = (box.y + box.h * 0.55) / q;
-    const ew = Math.max(box.w / q, nw * 0.5);
-
-    function blob(x, y, radius, rgb, alpha) {
-      const g = n.createRadialGradient(x, y, 0, x, y, radius);
-      g.addColorStop(0, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha})`);
-      g.addColorStop(1, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0)`);
-      n.fillStyle = g;
-      n.beginPath();
-      n.arc(x, y, radius, 0, Math.PI * 2);
-      n.fill();
-    }
-
-    function ribbon(x0, y0, x1, y1, count, thickness, colors) {
-      const wave = r() * Math.PI * 2;
-      for (let i = 0; i < count; i++) {
-        const t = r();
-        const x = x0 + (x1 - x0) * t + gaussian(r) * thickness * 0.4;
-        const y = y0 + (y1 - y0) * t
-          + Math.sin(t * Math.PI * 3 + wave) * thickness * 0.7
-          + gaussian(r) * thickness * 0.5;
-        const color = PALETTE[pick(colors, r)];
-        blob(x, y, thickness * (0.3 + r() * 0.9), color, 0.022 + r() * 0.04);
-      }
-    }
-
-    const cool = ['indigo', 'indigo', 'violet', 'violet', 'lavender'];
-    const warm = ['violet', 'indigo', 'amber'];
-
-    // A band of cloud flowing through the eye, slightly tilted
-    ribbon(-0.1 * nw, cy + ew * 0.12, 1.1 * nw, cy - ew * 0.14, 170, ew * 0.2, cool);
-    ribbon(cx - ew * 0.5, cy - ew * 0.12, cx + ew * 0.6, cy - ew * 0.22, 40, ew * 0.1, warm);
-    // Wisps in the corners
-    ribbon(0.55 * nw, 1.08 * nh, 1.1 * nw, 0.62 * nh, 70, ew * 0.14, cool);
-    ribbon(-0.05 * nw, 0.02 * nh, 0.28 * nw, 0.22 * nh, 35, ew * 0.1, cool);
-
-    // Stretch to full size (with some margin for drifting) and blur.
-    nebula.width = W + 40;
-    nebula.height = H + 40;
-    const big = nebula.getContext('2d');
-    big.imageSmoothingQuality = 'high';
-    big.filter = 'blur(10px)';
-    big.drawImage(nebulaSmall, 0, 0, nebula.width, nebula.height);
-    big.filter = 'none';
   }
 
   // ---------------------------------------------------------------------------
@@ -359,8 +274,7 @@
   function setup() {
     layout();
     eyeParticles = createEyeParticles(particleBudget());
-    dust = createDust(Math.round(Math.min(1300, Math.max(260, (W * H) / 1100))));
-    stars = createStars(Math.round(Math.min(700, (W * H) / 3800)));
+    puffs = createPuffs(Math.round(Math.min(70, Math.max(24, (W * H) / 20000))));
     scatter();
 
     const lastDelay = eyeParticles.reduce((m, p) => Math.max(m, p.delay + p.duration), 0);
@@ -375,67 +289,58 @@
   }
 
   function render(dt) {
-    // Background: deep blue-black, a touch lighter at the top
+    // Background: almost black, with a hint of violet
     ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = 1;
-    const sky = ctx.createLinearGradient(0, 0, 0, H);
-    sky.addColorStop(0, '#0b0918');
-    sky.addColorStop(1, '#050409');
-    ctx.fillStyle = sky;
+    const bg = ctx.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, '#0a090f');
+    bg.addColorStop(1, '#050408');
+    ctx.fillStyle = bg;
     ctx.fillRect(0, 0, W, H);
-
-    // Nebula clouds, breathing and drifting very slowly
-    const drift = Math.sin(time * 0.05) * 14;
-    ctx.globalAlpha = SETTINGS.nebulaBrightness * (0.9 + Math.sin(time * 0.2) * 0.1);
-    ctx.drawImage(nebula, -20 + drift, -20 - drift * 0.5);
 
     ctx.globalCompositeOperation = 'lighter';
 
-    // Stars, gently twinkling
-    for (const s of stars) {
-      const a = s.alpha * (0.65 + 0.35 * Math.sin(time * s.speed + s.phase));
-      ctx.globalAlpha = a;
-      ctx.fillStyle = '#e8e2ff';
-      ctx.fillRect(s.x * W, s.y * H, s.size, s.size);
-    }
-
-    // Background dust, swirling forever
-    for (const d of dust) {
+    // Background smoke: large faint puffs, drifting and rising slowly
+    for (const p of puffs) {
       if (dt > 0) {
-        const angle = flowAngle(d.x, d.y, time);
-        d.x += (Math.cos(angle) * d.speed + 3) * dt;
-        d.y += (Math.sin(angle) * d.speed + 1.5) * dt;
-        if (d.x < -20) d.x += W + 40; else if (d.x > W + 20) d.x -= W + 40;
-        if (d.y < -20) d.y += H + 40; else if (d.y > H + 20) d.y -= H + 40;
+        const angle = flowAngle(p.x, p.y, time);
+        p.x += (Math.cos(angle) * p.speed + 2) * dt;
+        p.y += (Math.sin(angle) * p.speed - 3) * dt;
+        const m = p.radius;
+        if (p.x < -m) p.x += W + 2 * m; else if (p.x > W + m) p.x -= W + 2 * m;
+        if (p.y < -m) p.y += H + 2 * m; else if (p.y > H + m) p.y -= H + 2 * m;
       }
-      const a = d.alpha * (0.7 + 0.3 * Math.sin(time * 0.8 + d.phase));
-      drawSprite(d.color, d.x, d.y, d.size * 3, a);
+      const a = p.alpha * (0.8 + 0.2 * Math.sin(time * 0.15 + p.phase)) * SETTINGS.smokeBrightness;
+      drawSprite(p.color, p.x, p.y, p.radius, a);
     }
 
     // The eye
-    const shimmer = reduceMotion ? 0 : SETTINGS.shimmer * Math.max(0.6, scale / 2);
+    const unit = Math.max(0.8, Math.min(1.5, scale / 1.6)); // size relative to screen
+    const breathe = reduceMotion ? 0 : SETTINGS.breathe * unit;
     for (const p of eyeParticles) {
       const local = time - p.delay;
       const progress = local <= 0 ? 0 : local >= p.duration ? 1 : easeInOutCubic(local / p.duration);
 
-      // Until it has fully arrived, the particle keeps floating on the wind.
+      // Until it has fully arrived, the particle drifts and rises like smoke.
       if (progress < 1 && dt > 0) {
         const angle = flowAngle(p.fx, p.fy, time);
-        p.fx += (Math.cos(angle) * 16 + 3) * dt;
-        p.fy += (Math.sin(angle) * 16 + 1.5) * dt;
+        p.fx += (Math.cos(angle) * 14 + 2) * dt;
+        p.fy += (Math.sin(angle) * 14 - 5) * dt;
       }
 
-      // Its home on the eye, plus a tiny wobble so the eye feels alive
-      const hx = originX + p.lx * scale + Math.sin(time * p.wobble + p.phase) * shimmer;
-      const hy = originY + p.ly * scale + Math.cos(time * p.wobble * 0.8 + p.phase) * shimmer;
+      // Its home on the eye. Wisps curl further from the line than the rest.
+      const reach = p.wisp ? breathe * 5 : breathe;
+      const hx = originX + p.lx * scale + Math.sin(time * p.sway + p.phase) * reach;
+      const hy = originY + p.ly * scale + Math.cos(time * p.sway * 0.8 + p.phase) * reach
+        - (p.wisp ? (0.5 + 0.5 * Math.sin(time * p.sway * 0.6 + p.phase)) * reach : 0);
 
       const x = p.fx + (hx - p.fx) * progress;
       const y = p.fy + (hy - p.fy) * progress;
 
-      const glow = reduceMotion ? 1 : 0.8 + 0.2 * Math.sin(time * p.twinkle + p.phase);
-      const alpha = p.alpha * (0.55 + 0.45 * progress) * glow * SETTINGS.eyeBrightness;
-      const size = p.size * (2 - progress) * Math.max(0.8, Math.min(1.4, scale / 1.6));
-      drawSprite(p.color, x, y, size * 3, alpha);
+      // While travelling it is a big faint puff; it condenses as it settles.
+      const alpha = p.alpha * (0.18 + 0.82 * progress) * SETTINGS.eyeBrightness;
+      const radius = p.size * unit * (6 + 26 * (1 - progress));
+      drawSprite(p.color, x, y, radius, alpha);
     }
 
     ctx.globalCompositeOperation = 'source-over';
