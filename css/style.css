@@ -284,6 +284,10 @@ a:focus-visible {
   text-transform: uppercase;
 }
 
+.section-label-first {
+  margin-top: 0;
+}
+
 .contact {
   display: flex;
   flex-wrap: wrap;
