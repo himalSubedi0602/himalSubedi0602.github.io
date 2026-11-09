@@ -411,3 +411,74 @@ a:focus-visible {
     transition: none !important;
   }
 }
+
+/* --------------------------------------------------------------------------
+   Picture grid (Hobbies page)
+   -------------------------------------------------------------------------- */
+
+.gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(9rem, 42%), 1fr));
+  gap: 1.6rem 1.2rem;
+  margin-bottom: 0.5rem;
+}
+
+.gallery-item {
+  margin: 0;
+}
+
+.gallery-item img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border: 1px solid rgba(236, 229, 216, 0.1);
+  border-radius: 6px;
+  /* Calm the photos down slightly so they sit in the dark page */
+  filter: saturate(0.85) brightness(0.88);
+  transition: filter 0.4s ease;
+}
+
+.gallery-item:hover img {
+  filter: none;
+}
+
+/* Logos sit on a faint panel, fully visible */
+.gallery-logo img {
+  object-fit: contain;
+  padding: 1.1rem;
+  background: rgba(236, 229, 216, 0.035);
+  filter: brightness(0.92);
+}
+
+.gallery-item figcaption {
+  margin-top: 0.55rem;
+  line-height: 1.3;
+}
+
+.gallery-title {
+  display: block;
+  color: var(--ink);
+  font-size: 1.05rem;
+  font-weight: 500;
+}
+
+.gallery-note {
+  display: block;
+  color: var(--gold);
+  font-size: 0.9rem;
+  font-style: italic;
+}
+
+.credits {
+  margin-top: 2.6rem;
+  color: var(--ink-faint);
+  font-size: 0.8rem;
+  line-height: 1.6;
+}
+
+.prose .credits a {
+  color: var(--ink-faint);
+  border-bottom-color: rgba(236, 229, 216, 0.2);
+}
