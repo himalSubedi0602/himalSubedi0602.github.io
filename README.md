@@ -40,12 +40,14 @@ smoke rather than dots.
 3. **Shaping:** smoke appears where the mask says the eye is, but the mask is
    looked up at a swirled position, so the lines billow and wisps rise off them.
 4. **Intro:** a smoke cloud gathers, then the lines condense out of it one by
-   one as the cloud thins to a faint haze around the eye.
-5. **Background:** dim, flowing smoke ribbons in violet with hints of gold.
+   one. Once formed, all other smoke clears and the eye settles into a calm drift.
+5. **Background:** dim smoke ribbons during the first intro only.
+6. **Hover:** moving the mouse onto the eye (or tapping it on a phone)
+   dissolves it back into smoke, and it forms again.
 
 The landing page plays the animation. Inner pages show the eye already
 formed and much dimmer, so text stays readable. Visitors with "reduce motion"
-turned on get a still image instead. The ✦ star on the landing page replays it.
+turned on get a still image instead. The ✦ star on the landing page replays it too.
 
 To change the mood, edit `SETTINGS` near the top of `js/eye.js` (eye size,
 brightness, intro length). Colours are in the shader, under `// --- colour`.
