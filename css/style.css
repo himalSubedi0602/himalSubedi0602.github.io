@@ -331,6 +331,13 @@ a:focus-visible {
   font-style: italic;
 }
 
+.entry-org {
+  color: var(--ink);
+  font-size: 1.05rem;
+  font-style: italic;
+  opacity: 0.85;
+}
+
 .entry p {
   margin: 0.35rem 0 0;
 }
