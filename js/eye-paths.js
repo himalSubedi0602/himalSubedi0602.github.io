@@ -7,9 +7,8 @@
  * Each path has:
  *   name    – what the line is (for humans reading this file)
  *   d       – the SVG path data, exactly as traced
- *   order   – when its particles start gathering (0 = first)
- *   density – how many particles per unit of length, relative to the others
- *   colors  – which palette colours its particles use (see eye.js PALETTE)
+ *   order   – when it condenses out of the smoke (0 = first)
+ *   density, colors – left over from the earlier particle version; unused now
  */
 window.EYE_DRAWING = {
   width: 494,

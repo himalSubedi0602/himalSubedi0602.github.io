@@ -1,116 +1,68 @@
 /*
  * The smoke eye.
  *
- * Draws slow, drifting smoke on a full-screen <canvas>, then condenses
- * thousands of soft smoke particles onto the traced lines of Himal's eye
- * (js/eye-paths.js). Once formed, the eye stays as the background, breathing
- * gently, with a few wisps curling off its lines.
+ * Renders animated smoke on the GPU (WebGL) and shapes it into the traced
+ * lines of Himal's eye (js/eye-paths.js).
+ *
+ * How it works, in short:
+ *   1. The eye's lines are drawn once into a hidden "mask" image. Its red
+ *      channel holds the lines, blue holds a wide soft halo, and green holds
+ *      *when* each bit of line should appear (brow first, scar last, each
+ *      line drawn from start to end).
+ *   2. A fragment shader runs for every pixel, every frame. It builds smoke
+ *      texture from layered noise ("fbm") that is swirled by more noise
+ *      ("domain warping"), the classic recipe for smoke and clouds.
+ *   3. That smoke is shown where the mask says the eye is. The mask is
+ *      sampled at a position pushed around by the swirl, so lines billow and
+ *      wisps drift off them instead of looking like clean strokes.
+ *   4. On the landing page, a smoke cloud gathers first, then the lines
+ *      condense out of it one by one while the cloud thins.
  *
  * Page options, set on <body>:
- *   data-eye="intro"  – landing page: play the gathering animation, and fit
- *                       the eye in the space above the element marked
- *                       [data-eye-above].
- *   data-eye="rest"   – inner pages: the eye is already formed, dimmer and
- *                       centred, so text on top stays easy to read.
+ *   data-eye="intro"  – landing page: play the intro, place the eye above
+ *                       the element marked [data-eye-above].
+ *   data-eye="rest"   – inner pages: eye already formed, dimmer, centred.
  *
  * Visitors who ask their system for reduced motion get a still image.
+ * Without WebGL, the page simply shows its dark background.
  */
 (function () {
   'use strict';
 
   const canvas = document.getElementById('sky');
   const drawing = window.EYE_DRAWING;
-  if (!canvas || !canvas.getContext || !drawing) return;
-
-  const ctx = canvas.getContext('2d');
   const body = document.body;
+  function showText() { body.classList.add('is-ready'); }
+  if (!canvas || !drawing) return showText();
+
+  const gl = canvas.getContext('webgl', { antialias: false, alpha: false });
+  if (!gl) return showText();
+
   const mode = body.dataset.eye === 'intro' ? 'intro' : 'rest';
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   // ---------------------------------------------------------------------------
   // Look & feel. Tweak these to change the mood.
   // ---------------------------------------------------------------------------
-
-  // Smoke colours (RGB): muted greys with a hint of violet, and a dim ember.
-  // The colour names match the ones used in js/eye-paths.js.
-  const PALETTE = {
-    lavender: [206, 200, 222],  // pale smoke
-    ice:      [218, 216, 230],  // near-white smoke
-    violet:   [146, 132, 190],  // violet haze
-    indigo:   [112, 112, 162],  // deep haze
-    amber:    [192, 160, 132]   // faint ember
-  };
-
   const SETTINGS = {
-    eyeBrightness: mode === 'intro' ? 1 : 0.24, // overall eye opacity
-    smokeBrightness: mode === 'intro' ? 1 : 0.7, // background smoke opacity
-    particlesPerPixel: 5,     // eye particles per pixel of eye width
-    minParticles: 1400,
-    maxParticles: 4200,
-    lineThickness: 1.4,         // spread around each line, in tracing units
-    wispShare: 0.14,            // share of particles that curl off as wisps
-    gatherSpeed: 1,             // >1 = faster intro, <1 = slower
-    breathe: 1.2                // how far settled smoke sways, in px
+    // Eye width as a share of the screen width, with limits in CSS pixels
+    eyeWidth: mode === 'intro' ? 0.3 : 0.45,
+    eyeMinWidth: 260,
+    eyeMaxWidth: mode === 'intro' ? 480 : 640,
+    eyeBrightness: mode === 'intro' ? 1 : 0.32,
+    smokeBrightness: mode === 'intro' ? 1 : 0.6,  // background smoke ribbons
+    introSeconds: 4.5,      // time for all lines to condense
+    renderScale: 0.75       // render at 75% resolution; smoke is soft anyway
   };
 
-  // ---------------------------------------------------------------------------
-  // Small helpers
-  // ---------------------------------------------------------------------------
-
-  // Seeded random numbers, so the smoke looks the same on every visit.
-  function seededRandom(seed) {
-    return function () {
-      seed = (seed * 1664525 + 1013904223) >>> 0;
-      return seed / 4294967296;
-    };
-  }
-  const rand = Math.random;
-  function gaussian(r) {
-    // Roughly bell-shaped number between -1 and 1 (centre-weighted).
-    return (r() + r() + r() - 1.5) / 1.5;
-  }
-  function pick(list, r) { return list[Math.floor(r() * list.length)]; }
-  function easeInOutCubic(t) {
-    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-  }
-
-  // A smooth, slowly changing "wind" direction at any point, so smoke curls
-  // instead of moving in straight lines.
-  function flowAngle(x, y, t) {
-    const s = 0.0016;
-    return (
-      Math.sin(x * s + t * 0.12) +
-      Math.cos(y * s * 1.3 - t * 0.09) +
-      Math.sin((x + y) * s * 0.7 + t * 0.05)
-    ) * Math.PI;
-  }
-
-  // One soft puff image per colour, drawn once and reused for speed.
-  // No bright centre: it fades evenly, like smoke rather than a star.
-  const sprites = {};
-  Object.keys(PALETTE).forEach(function (key) {
-    const [r, g, b] = PALETTE[key];
-    const size = 64;
-    const c = document.createElement('canvas');
-    c.width = c.height = size;
-    const g2 = c.getContext('2d');
-    const grad = g2.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-    grad.addColorStop(0, `rgba(${r},${g},${b},0.85)`);
-    grad.addColorStop(0.4, `rgba(${r},${g},${b},0.35)`);
-    grad.addColorStop(0.75, `rgba(${r},${g},${b},0.08)`);
-    grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
-    g2.fillStyle = grad;
-    g2.fillRect(0, 0, size, size);
-    sprites[key] = c;
-  });
+  // Padding around the drawing inside the mask, so smoke can spill past it
+  const PAD = 60;
+  const MASK_SCALE = 2;     // mask pixels per tracing unit
 
   // ---------------------------------------------------------------------------
-  // 1. Turn the traced lines into lists of points
+  // 1. Build the mask image from the traced lines
   // ---------------------------------------------------------------------------
-
-  // The browser can measure SVG paths for us, so we put each path into a
-  // hidden <svg>, walk along it in small steps, and record the points.
-  function traceLines() {
+  function buildMask() {
     const NS = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(NS, 'svg');
     svg.setAttribute('width', '0');
@@ -119,268 +71,321 @@
     svg.style.visibility = 'hidden';
     body.appendChild(svg);
 
-    const lines = drawing.paths.map(function (path) {
+    const mw = (drawing.width + PAD * 2) * MASK_SCALE;
+    const mh = (drawing.height + PAD * 2) * MASK_SCALE;
+
+    function layer() {
+      const c = document.createElement('canvas');
+      c.width = mw;
+      c.height = mh;
+      const x = c.getContext('2d');
+      x.setTransform(MASK_SCALE, 0, 0, MASK_SCALE, PAD * MASK_SCALE, PAD * MASK_SCALE);
+      x.lineCap = 'round';
+      x.lineJoin = 'round';
+      return x;
+    }
+    const core = layer();   // the lines, soft-edged
+    const halo = layer();   // a wide glow around them
+    const order = layer();  // when each part appears
+
+    const total = drawing.paths.length;
+    drawing.paths.forEach(function (path) {
       const el = document.createElementNS(NS, 'path');
       el.setAttribute('d', path.d);
       svg.appendChild(el);
-      const length = el.getTotalLength();
-      const steps = Math.max(2, Math.ceil(length / 0.5));
-      const points = [];
-      for (let i = 0; i <= steps; i++) {
-        const p = el.getPointAtLength((i / steps) * length);
-        points.push([p.x, p.y]);
-      }
-      return Object.assign({}, path, { length: length, points: points });
-    });
+      const p2d = new Path2D(path.d);
 
-    svg.remove();
-    return lines;
-  }
-
-  const lines = traceLines();
-
-  // ---------------------------------------------------------------------------
-  // 2. Create the particles
-  // ---------------------------------------------------------------------------
-
-  let eyeParticles = [];
-  let puffs = [];
-
-  function createEyeParticles(total) {
-    const totalWeight = lines.reduce((sum, l) => sum + l.length * l.density, 0);
-    const particles = [];
-
-    lines.forEach(function (line) {
-      const count = Math.round(total * (line.length * line.density) / totalWeight);
-      const pts = line.points;
-
-      for (let k = 0; k < count; k++) {
-        // Spread evenly along the line, with a little randomness.
-        const along = (k + rand()) / count;
-        const i = Math.min(pts.length - 2, Math.floor(along * (pts.length - 1)));
-        const [x0, y0] = pts[i];
-        const [x1, y1] = pts[i + 1];
-
-        // Push the particle a little to either side of the line
-        // (perpendicular to it) so the stroke looks soft.
-        const dx = x1 - x0, dy = y1 - y0;
-        const len = Math.hypot(dx, dy) || 1;
-        const isWisp = rand() < SETTINGS.wispShare;
-        const offset = gaussian(rand) * SETTINGS.lineThickness * (isWisp ? 2.5 : 1);
-
-        particles.push({
-          // Home position, in tracing units
-          lx: x0 - (dy / len) * offset,
-          ly: y0 + (dx / len) * offset,
-          color: pick(line.colors, rand),
-          wisp: isWisp,
-          size: isWisp ? 2 + rand() * 2 : 0.8 + rand() * 0.9,
-          alpha: isWisp ? 0.03 + rand() * 0.04 : 0.07 + rand() * 0.08,
-          // Lines gather one after another, each one "drawn" from start to end
-          delay: (0.3 + line.order * 0.45 + along * 0.8 + rand() * 0.6) / SETTINGS.gatherSpeed,
-          duration: (2 + rand() * 1.1) / SETTINGS.gatherSpeed,
-          phase: rand() * Math.PI * 2,
-          sway: 0.15 + rand() * 0.35,
-          // Free-floating position before it reaches home (set in scatter())
-          fx: 0,
-          fy: 0
-        });
-      }
-    });
-    return particles;
-  }
-
-  // Place every eye particle somewhere in a loose cloud, ready to gather.
-  function scatter() {
-    const box = eyeBox();
-    eyeParticles.forEach(function (p) {
-      p.fx = box.x + box.w / 2 + gaussian(rand) * box.w * 0.9;
-      p.fy = box.y + box.h * 0.6 + gaussian(rand) * box.h * 1.4;
-    });
-  }
-
-  // Big, faint, slowly drifting puffs of background smoke.
-  function createPuffs(count) {
-    const r = seededRandom(11);
-    const list = [];
-    for (let i = 0; i < count; i++) {
-      list.push({
-        x: r() * W,
-        y: r() * H,
-        radius: 90 + r() * 220,
-        color: pick(['indigo', 'indigo', 'violet', 'lavender'], r),
-        alpha: 0.03 + r() * 0.04,
-        speed: 4 + r() * 7,
-        phase: r() * Math.PI * 2
+      // Soft edges without blur filters: stack wide faint strokes under a
+      // narrow strong one.
+      [[7, 0.12], [4.5, 0.22], [2.6, 0.45], [1.3, 1]].forEach(function ([w, a]) {
+        core.lineWidth = w;
+        core.strokeStyle = `rgba(255,255,255,${a})`;
+        core.stroke(p2d);
       });
+      [[34, 0.05], [22, 0.08], [12, 0.12]].forEach(function ([w, a]) {
+        halo.lineWidth = w;
+        halo.strokeStyle = `rgba(255,255,255,${a})`;
+        halo.stroke(p2d);
+      });
+
+      // Appearance time: walk along the path in short segments, each with a
+      // slightly later time, so the line "draws" from start to end.
+      const length = el.getTotalLength();
+      const steps = Math.max(8, Math.ceil(length / 4));
+      order.lineWidth = 40;
+      let prev = el.getPointAtLength(0);
+      for (let i = 1; i <= steps; i++) {
+        const pt = el.getPointAtLength((i / steps) * length);
+        const t = (path.order + (i / steps) * 0.9) / total; // 0..1
+        order.strokeStyle = `rgb(0,${Math.round(20 + t * 215)},0)`;
+        order.beginPath();
+        order.moveTo(prev.x, prev.y);
+        order.lineTo(pt.x, pt.y);
+        order.stroke();
+        prev = pt;
+      }
+    });
+    svg.remove();
+
+    // Combine the three layers into one RGBA image: R = core, G = order, B = halo
+    const a = core.getImageData(0, 0, mw, mh).data;
+    const b = halo.getImageData(0, 0, mw, mh).data;
+    const o = order.getImageData(0, 0, mw, mh).data;
+    const out = new Uint8Array(mw * mh * 4);
+    for (let i = 0; i < out.length; i += 4) {
+      out[i] = a[i + 3];                      // core coverage
+      out[i + 1] = o[i + 3] ? o[i + 1] : 255; // order (255 = never)
+      out[i + 2] = b[i + 3];                  // halo coverage
+      out[i + 3] = 255;
     }
-    return list;
+    return { data: out, width: mw, height: mh };
   }
+
+  // ---------------------------------------------------------------------------
+  // 2. The shaders
+  // ---------------------------------------------------------------------------
+  const VERTEX = `
+    attribute vec2 aPos;
+    void main() { gl_Position = vec4(aPos, 0.0, 1.0); }
+  `;
+
+  const FRAGMENT = `
+    precision highp float;
+
+    uniform vec2  uRes;        // canvas size in pixels
+    uniform float uTime;       // seconds
+    uniform float uProgress;   // intro progress, 0 -> 1 (and beyond)
+    uniform vec4  uEye;        // mask rectangle: x, y, width, height (px, top-left origin)
+    uniform float uEyeAlpha;
+    uniform float uSmokeAlpha;
+    uniform sampler2D uMask;
+
+    // --- noise ---------------------------------------------------------------
+    float hash(vec2 p) {
+      p = fract(p * vec2(123.34, 456.21));
+      p += dot(p, p + 45.32);
+      return fract(p.x * p.y);
+    }
+    float noise(vec2 p) {
+      vec2 i = floor(p), f = fract(p);
+      vec2 u = f * f * (3.0 - 2.0 * f);
+      return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
+                 mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+    }
+    // Fractal noise: several layers of noise, each finer and fainter
+    float fbm(vec2 p) {
+      float v = 0.0, a = 0.5;
+      mat2 m = mat2(1.6, 1.2, -1.2, 1.6);
+      for (int i = 0; i < 5; i++) { v += a * noise(p); p = m * p; a *= 0.5; }
+      return v;
+    }
+
+    vec4 mask(vec2 px) {
+      vec2 uv = (px - uEye.xy) / uEye.zw;
+      if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) return vec4(0.0, 1.0, 0.0, 0.0);
+      return texture2D(uMask, uv);
+    }
+
+    void main() {
+      vec2 px = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y); // top-left origin
+      vec2 uv = px / uRes;
+      float t = uTime;
+
+      // --- swirling smoke field (domain-warped fbm), rising slowly ----------
+      vec2 p = px / uRes.y * 2.4 + vec2(0.0, t * 0.03);
+      vec2 q = vec2(fbm(p + vec2(0.0, t * 0.05)),
+                    fbm(p + vec2(5.2, 1.3) - t * 0.04));
+      vec2 r = vec2(fbm(p + 3.0 * q + vec2(1.7, 9.2) + t * 0.07),
+                    fbm(p + 3.0 * q + vec2(8.3, 2.8) - t * 0.05));
+      float n = fbm(p + 3.0 * r);
+
+      // Finer smoke detail scaled to the eye, so its texture matches its size
+      vec2 pe = (px - uEye.xy) / uEye.z * 7.0 + vec2(0.0, t * 0.12);
+      float fine = fbm(pe + 2.5 * r + t * 0.05);
+
+      // --- background: dim smoke ribbons, like the mockup -------------------
+      float band1 = exp(-pow((uv.y - (0.78 - 0.55 * uv.x) + (q.x - 0.5) * 0.35) / 0.16, 2.0));
+      float band2 = exp(-pow((uv.y - (1.42 - 0.62 * uv.x) + (q.y - 0.5) * 0.3) / 0.12, 2.0));
+      float band3 = exp(-pow((uv.y - (0.12 - 0.25 * uv.x) + (r.x - 0.5) * 0.3) / 0.1, 2.0));
+      float ribbons = (band1 * 0.55 + band2 * 0.4 + band3 * 0.3) * smoothstep(0.32, 0.95, n);
+      float bgDensity = ribbons * 0.75 * uSmokeAlpha;
+
+      // --- the eye ----------------------------------------------------------
+      float eyeSize = uEye.z;
+      // Push the lookup around with the swirl so the lines billow.
+      vec2 disp = (r - 0.5) * eyeSize * 0.05 + (q - 0.5) * eyeSize * 0.02;
+      vec4 m = mask(px + disp);
+
+      // Appear once the intro passes this part's time (green channel)
+      float reveal = smoothstep(m.g - 0.06, m.g + 0.04, uProgress);
+
+      // Wisps: the lines sampled a little lower and pushed harder, so smoke
+      // seems to rise off them.
+      vec2 rise = vec2((r.y - 0.5) * eyeSize * 0.08, eyeSize * (0.025 + 0.045 * fine));
+      vec4 mw = mask(px + rise + disp * 1.8);
+      float wispReveal = smoothstep(mw.g - 0.06, mw.g + 0.1, uProgress - 0.1);
+
+      float lineDensity = m.r * smoothstep(0.22, 0.78, fine) * 1.1 * reveal;
+      float haloDensity = m.b * smoothstep(0.3, 0.8, n * 0.5 + fine * 0.5) * 1.3 * reveal;
+      float wispDensity = mw.r * smoothstep(0.4, 0.85, fine) * 0.7 * wispReveal;
+
+      // The intro cloud: billowing smoke over the eye that thins as lines form
+      vec2 ec = (px - (uEye.xy + uEye.zw * 0.5)) / uEye.zw;
+      float ellipse = 1.0 - smoothstep(0.15, 0.55, length(ec * vec2(1.0, 1.25)));
+      float cloudLife = smoothstep(0.0, 0.18, uProgress) * (1.0 - 0.7 * smoothstep(0.45, 1.05, uProgress));
+      float cloud = ellipse * smoothstep(0.3, 0.85, n * 0.6 + fine * 0.5) * cloudLife * 0.9;
+
+      float eyeDensity = (lineDensity + haloDensity + wispDensity + cloud) * uEyeAlpha;
+
+      // --- colour -----------------------------------------------------------
+      vec3 bg     = mix(vec3(0.038, 0.032, 0.065), vec3(0.018, 0.015, 0.03), uv.y);
+      vec3 deep   = vec3(0.22, 0.17, 0.42);
+      vec3 violet = vec3(0.52, 0.40, 0.80);
+      vec3 pale   = vec3(0.80, 0.74, 0.96);
+      vec3 amber  = vec3(0.92, 0.66, 0.38);
+
+      vec3 smoke = mix(deep, violet, smoothstep(0.25, 0.8, n));
+      smoke = mix(smoke, amber, smoothstep(0.58, 0.82, r.y) * 0.55);
+
+      vec3 eyeCol = mix(violet, pale, smoothstep(0.55, 1.0, fine) * 0.8);
+      eyeCol = mix(eyeCol, amber, smoothstep(0.6, 0.85, r.x) * 0.45);
+
+      // Soft "exposure" curve so dense smoke glows without blowing out
+      vec3 col = bg;
+      col += smoke * (1.0 - exp(-bgDensity * 1.6));
+      col += eyeCol * (1.0 - exp(-eyeDensity * 1.2)) * 0.8;
+
+      // A little grain hides colour banding in dark gradients
+      col += (hash(px + fract(t)) - 0.5) / 255.0;
+
+      gl_FragColor = vec4(col, 1.0);
+    }
+  `;
+
+  function compile(type, src) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+      console.error(gl.getShaderInfoLog(s));
+      return null;
+    }
+    return s;
+  }
+
+  const vs = compile(gl.VERTEX_SHADER, VERTEX);
+  const fs = compile(gl.FRAGMENT_SHADER, FRAGMENT);
+  if (!vs || !fs) return showText();
+  const program = gl.createProgram();
+  gl.attachShader(program, vs);
+  gl.attachShader(program, fs);
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    console.error(gl.getProgramInfoLog(program));
+    return showText();
+  }
+  gl.useProgram(program);
+
+  // One big triangle that covers the whole screen
+  const buffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  const aPos = gl.getAttribLocation(program, 'aPos');
+  gl.enableVertexAttribArray(aPos);
+  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+  // Upload the mask
+  const maskImage = buildMask();
+  const texture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, maskImage.width, maskImage.height, 0,
+    gl.RGBA, gl.UNSIGNED_BYTE, maskImage.data);
+
+  const u = {};
+  ['uRes', 'uTime', 'uProgress', 'uEye', 'uEyeAlpha', 'uSmokeAlpha', 'uMask'].forEach(function (name) {
+    u[name] = gl.getUniformLocation(program, name);
+  });
+  gl.uniform1i(u.uMask, 0);
+  gl.uniform1f(u.uEyeAlpha, SETTINGS.eyeBrightness);
+  gl.uniform1f(u.uSmokeAlpha, SETTINGS.smokeBrightness);
 
   // ---------------------------------------------------------------------------
   // 3. Layout: where and how big the eye is on this screen
   // ---------------------------------------------------------------------------
-
-  let W = 0, H = 0, dpr = 1;
-  let scale = 1, originX = 0, originY = 0;
-
-  function eyeBox() {
-    return { x: originX, y: originY, w: drawing.width * scale, h: drawing.height * scale };
-  }
-
   function layout() {
-    // The canvas is sized by CSS to fill the window; match its pixels to that.
-    W = canvas.clientWidth || window.innerWidth;
-    H = canvas.clientHeight || window.innerHeight;
-    dpr = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = Math.round(W * dpr);
-    canvas.height = Math.round(H * dpr);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const W = canvas.clientWidth || window.innerWidth;
+    const H = canvas.clientHeight || window.innerHeight;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const res = dpr * SETTINGS.renderScale;
+    canvas.width = Math.max(1, Math.round(W * res));
+    canvas.height = Math.max(1, Math.round(H * res));
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.uniform2f(u.uRes, canvas.width, canvas.height);
 
-    let top = H * 0.06;
-    let bottom = H * 0.94;
-    let maxWidth = Math.min(W * 0.94, 1240);
+    // Eye size (CSS px), from the drawing's own width
+    const eyeW = Math.min(W * 0.9,
+      Math.max(SETTINGS.eyeMinWidth, Math.min(SETTINGS.eyeMaxWidth, W * SETTINGS.eyeWidth)));
+    let scale = eyeW / drawing.width;
 
+    const cx = W / 2;
+    let cy = H * 0.5;
     if (mode === 'intro') {
-      // Fit the eye into the space above the title.
+      // Centre the eye in the space above the title.
       const anchor = document.querySelector('[data-eye-above]');
-      if (anchor) {
-        const anchorTop = anchor.getBoundingClientRect().top;
-        bottom = Math.max(H * 0.34, anchorTop - H * 0.015);
-      }
-      maxWidth = Math.min(W * 0.96, 1150);
-      top = H * 0.04;
+      const room = Math.max(anchor ? anchor.getBoundingClientRect().top : H * 0.5, H * 0.25);
+      scale = Math.min(scale, (room * 0.8) / drawing.height);
+      cy = room * 0.52;
     }
 
-    const roomH = bottom - top;
-    scale = Math.min(maxWidth / drawing.width, roomH / drawing.height);
-    originX = (W - drawing.width * scale) / 2;
-    originY = top + (roomH - drawing.height * scale) / 2;
+    // Mask rectangle (includes padding), converted to canvas pixels
+    const w = (drawing.width + PAD * 2) * scale;
+    const h = (drawing.height + PAD * 2) * scale;
+    const x = cx - w / 2;
+    const y = cy - h / 2;
+    gl.uniform4f(u.uEye, x * res, y * res, w * res, h * res);
   }
 
   // ---------------------------------------------------------------------------
-  // 4. Drawing
+  // 4. Run
   // ---------------------------------------------------------------------------
-
-  let time = 0;          // seconds since the intro started
-  let readyAt = 0;       // when the page text should fade in
+  const skipIntro = mode === 'rest' || reduceMotion;
+  let start = performance.now();
   let isReady = false;
 
-  function particleBudget() {
-    const n = Math.round(drawing.width * scale * SETTINGS.particlesPerPixel);
-    return Math.max(SETTINGS.minParticles, Math.min(SETTINGS.maxParticles, n));
-  }
+  function draw(now) {
+    const time = (now - start) / 1000;
+    const progress = skipIntro ? 2 : time / SETTINGS.introSeconds;
+    gl.uniform1f(u.uTime, time + 20); // +20: start mid-swirl
+    gl.uniform1f(u.uProgress, progress);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
 
-  function setup() {
-    layout();
-    eyeParticles = createEyeParticles(particleBudget());
-    puffs = createPuffs(Math.round(Math.min(70, Math.max(24, (W * H) / 20000))));
-    scatter();
-
-    const lastDelay = eyeParticles.reduce((m, p) => Math.max(m, p.delay + p.duration), 0);
-    readyAt = lastDelay * 0.55;
-    // Inner pages and reduced-motion visitors skip straight to the formed eye.
-    time = (mode === 'rest' || reduceMotion) ? lastDelay + 1 : 0;
-  }
-
-  function drawSprite(color, x, y, radius, alpha) {
-    ctx.globalAlpha = alpha;
-    ctx.drawImage(sprites[color], x - radius, y - radius, radius * 2, radius * 2);
-  }
-
-  function render(dt) {
-    // Background: almost black, with a hint of violet
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.globalAlpha = 1;
-    const bg = ctx.createLinearGradient(0, 0, 0, H);
-    bg.addColorStop(0, '#0a090f');
-    bg.addColorStop(1, '#050408');
-    ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, W, H);
-
-    ctx.globalCompositeOperation = 'lighter';
-
-    // Background smoke: large faint puffs, drifting and rising slowly
-    for (const p of puffs) {
-      if (dt > 0) {
-        const angle = flowAngle(p.x, p.y, time);
-        p.x += (Math.cos(angle) * p.speed + 2) * dt;
-        p.y += (Math.sin(angle) * p.speed - 3) * dt;
-        const m = p.radius;
-        if (p.x < -m) p.x += W + 2 * m; else if (p.x > W + m) p.x -= W + 2 * m;
-        if (p.y < -m) p.y += H + 2 * m; else if (p.y > H + m) p.y -= H + 2 * m;
-      }
-      const a = p.alpha * (0.8 + 0.2 * Math.sin(time * 0.15 + p.phase)) * SETTINGS.smokeBrightness;
-      drawSprite(p.color, p.x, p.y, p.radius, a);
-    }
-
-    // The eye
-    const unit = Math.max(0.8, Math.min(1.5, scale / 1.6)); // size relative to screen
-    const breathe = reduceMotion ? 0 : SETTINGS.breathe * unit;
-    for (const p of eyeParticles) {
-      const local = time - p.delay;
-      const progress = local <= 0 ? 0 : local >= p.duration ? 1 : easeInOutCubic(local / p.duration);
-
-      // Until it has fully arrived, the particle drifts and rises like smoke.
-      if (progress < 1 && dt > 0) {
-        const angle = flowAngle(p.fx, p.fy, time);
-        p.fx += (Math.cos(angle) * 14 + 2) * dt;
-        p.fy += (Math.sin(angle) * 14 - 5) * dt;
-      }
-
-      // Its home on the eye. Wisps curl further from the line than the rest.
-      const reach = p.wisp ? breathe * 5 : breathe;
-      const hx = originX + p.lx * scale + Math.sin(time * p.sway + p.phase) * reach;
-      const hy = originY + p.ly * scale + Math.cos(time * p.sway * 0.8 + p.phase) * reach
-        - (p.wisp ? (0.5 + 0.5 * Math.sin(time * p.sway * 0.6 + p.phase)) * reach : 0);
-
-      const x = p.fx + (hx - p.fx) * progress;
-      const y = p.fy + (hy - p.fy) * progress;
-
-      // While travelling it is a big faint puff; it condenses as it settles.
-      const alpha = p.alpha * (0.18 + 0.82 * progress) * SETTINGS.eyeBrightness;
-      const radius = p.size * unit * (6 + 26 * (1 - progress));
-      drawSprite(p.color, x, y, radius, alpha);
-    }
-
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.globalAlpha = 1;
-
-    if (!isReady && time >= readyAt) {
+    if (!isReady && progress > 0.6) {
       isReady = true;
-      body.classList.add('is-ready');
+      showText();
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // 5. Run
-  // ---------------------------------------------------------------------------
-
-  setup();
-
-  let last = performance.now();
-  function frame(now) {
-    // Cap the step so switching tabs doesn't make everything jump.
-    const dt = Math.min((now - last) / 1000, 0.05);
-    last = now;
-    time += dt;
-    render(dt);
-    requestAnimationFrame(frame);
-  }
+  layout();
 
   if (reduceMotion) {
-    render(0);
+    draw(start);
   } else {
-    requestAnimationFrame(function (now) { last = now; frame(now); });
+    (function loop(now) {
+      draw(now);
+      requestAnimationFrame(loop);
+    })(start);
   }
 
-  // Re-fit the eye when the window changes size.
   let resizeTimer;
   window.addEventListener('resize', function () {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(function () {
       layout();
-      if (reduceMotion) render(0);
+      if (reduceMotion) draw(performance.now());
     }, 120);
   });
 
@@ -388,8 +393,7 @@
   const replay = document.querySelector('[data-replay]');
   if (replay && !reduceMotion) {
     replay.addEventListener('click', function () {
-      scatter();
-      time = 0;
+      start = performance.now();
     });
   }
 })();

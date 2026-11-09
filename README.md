@@ -27,26 +27,28 @@ assets/favicon.svg       Browser tab icon
 
 ## How the eye animation works (js/eye.js)
 
-1. **Trace:** each line of the eye (brow, crease, outline, iris, pupil, scar)
-   is put into a hidden SVG so the browser can measure it, then sampled into
-   points every half-unit along its length.
-2. **Particles:** a few thousand soft smoke particles get a "home" spread
-   evenly along those lines, pushed slightly to either side so the strokes look soft.
-   Busier parts (iris, pupil, scar) get more particles per unit of length.
-3. **Gather:** every particle starts as a big, faint puff in a loose cloud,
-   drifting and rising on a smooth "wind" (`flowAngle`). After a delay it eases
-   towards its home, shrinking and thickening as it settles.
-   Delays go line by line, and along each line from start to end, so the eye
-   looks like it's being drawn.
-4. **Rest:** settled smoke sways gently, and a few wisps curl off the lines.
-5. **Background:** near-black, with large faint puffs of smoke drifting upward.
+The smoke is drawn by the GPU with WebGL, so it can look like real churning
+smoke rather than dots.
+
+1. **Mask:** the eye's lines (brow, crease, outline, iris, pupil, scar) are
+   drawn once into a hidden image. Red = the lines, blue = a soft halo,
+   green = *when* each part should appear (brow first, scar last, each line
+   drawn from start to end).
+2. **Smoke:** a fragment shader runs for every pixel, every frame, building
+   smoke from layered noise (fbm) that is swirled by more noise (domain
+   warping), the classic recipe for smoke and clouds.
+3. **Shaping:** smoke appears where the mask says the eye is, but the mask is
+   looked up at a swirled position, so the lines billow and wisps rise off them.
+4. **Intro:** a smoke cloud gathers, then the lines condense out of it one by
+   one as the cloud thins to a faint haze around the eye.
+5. **Background:** dim, flowing smoke ribbons in violet with hints of gold.
 
 The landing page plays the animation. Inner pages show the eye already
 formed and much dimmer, so text stays readable. Visitors with "reduce motion"
 turned on get a still image instead. The ✦ star on the landing page replays it.
 
-To change the mood, edit `PALETTE` and `SETTINGS` near the top of `js/eye.js`
-(brightness, particle count, line thickness, speed).
+To change the mood, edit `SETTINGS` near the top of `js/eye.js` (eye size,
+brightness, intro length). Colours are in the shader, under `// --- colour`.
 
 ## Editing content
 
