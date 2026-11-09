@@ -293,6 +293,26 @@ a:focus-visible {
   list-style: none;
 }
 
+/* Outlined button, e.g. "Hobbies →" on the About page */
+.prose a.button {
+  display: inline-block;
+  margin-top: 0.4rem;
+  padding: 0.45rem 1.3rem 0.5rem;
+  border: 1px solid var(--gold-soft);
+  border-radius: 2rem;
+  color: var(--ink);
+  font-size: 0.95rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  transition: color 0.25s ease, background-color 0.25s ease;
+}
+
+.prose a.button:hover,
+.prose a.button:focus-visible {
+  color: var(--bg);
+  background-color: var(--gold);
+}
+
 .placeholder {
   color: var(--ink-faint);
   font-style: italic;
