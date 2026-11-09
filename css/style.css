@@ -331,6 +331,14 @@ a:focus-visible {
   font-style: italic;
 }
 
+.entries-compact .entry {
+  margin-bottom: 0.9rem;
+}
+
+.entries-compact .entry-title {
+  font-size: 1.15rem;
+}
+
 .entry-org {
   color: var(--ink);
   font-size: 1.05rem;
