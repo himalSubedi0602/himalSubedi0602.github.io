@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Himal Subedi</title>
+  <meta name="description" content="Himal Subedi: student of software engineering and mathematics.">
+  <meta name="theme-color" content="#07060d">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&display=swap">
+  <link rel="stylesheet" href="css/style.css">
+  <script>
+    // Lets the CSS hide the title until the eye has formed. If the animation
+    // can't run for any reason, show the text anyway after a few seconds.
+    document.documentElement.classList.add('js');
+    setTimeout(function () { document.body.classList.add('is-ready'); }, 6000);
+  </script>
+</head>
+<body class="home" data-eye="intro">
+  <canvas id="sky" aria-hidden="true"></canvas>
+
+  <main class="home-main">
+    <div class="title-block" data-eye-above>
+      <h1 class="name">Himal<br>Subedi</h1>
+      <p class="tagline">
+        Student<span class="sep" aria-hidden="true">|</span>Software Engineering<span class="sep" aria-hidden="true">|</span>Mathematics
+      </p>
+
+      <nav aria-label="Contents">
+        <ol class="toc">
+          <li><a href="about.html"><span>About</span><span class="leader" aria-hidden="true"></span><span class="num" aria-hidden="true">I</span></a></li>
+          <li><a href="education.html"><span>Education</span><span class="leader" aria-hidden="true"></span><span class="num" aria-hidden="true">II</span></a></li>
+          <li><a href="experience.html"><span>Experience</span><span class="leader" aria-hidden="true"></span><span class="num" aria-hidden="true">III</span></a></li>
+          <li><a href="projects.html"><span>Projects</span><span class="leader" aria-hidden="true"></span><span class="num" aria-hidden="true">IV</span></a></li>
+        </ol>
+      </nav>
+
+      <button class="star" type="button" data-replay aria-label="Replay the eye animation">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 0 C12.6 8 16 11.4 24 12 C16 12.6 12.6 16 12 24 C11.4 16 8 12.6 0 12 C8 11.4 11.4 8 12 0 Z" fill="currentColor"/>
+        </svg>
+      </button>
+    </div>
+  </main>
+
+  <script src="js/eye-paths.js"></script>
+  <script src="js/eye.js"></script>
+</body>
+</html>
